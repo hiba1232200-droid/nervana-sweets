@@ -1,0 +1,594 @@
+// ============================================================================
+//  NERVANA SWEETS — PostgreSQL schema (Prisma ORM)
+//  Professional relational model for the storefront + admin dashboard.
+//  Generate: `npx prisma generate` · Migrate: `npx prisma migrate dev`
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+//  RBAC — Users, Roles, Permissions
+// ---------------------------------------------------------------------------
+enum UserStatus {
+  ACTIVE
+  BANNED
+  PENDING
+}
+
+model User {
+  id            String     @id @default(cuid())
+  name          String?
+  email         String     @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String? // bcrypt/argon2 — null for pure OAuth users
+  phone         String?    @unique
+  status        UserStatus @default(ACTIVE)
+
+  phoneVerified DateTime?
+
+  // Two-Factor Authentication
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String? // TOTP secret (encrypted at rest in production)
+
+  // Bumped by "log out from all devices" — invalidates existing JWTs
+  tokenVersion Int @default(0)
+
+  roleId String?
+  role   Role?   @relation(fields: [roleId], references: [id])
+
+  customer      Customer?
+  accounts      Account[]
+  sessions      Session[]
+  addresses     Address[]
+  orders        Order[]
+  driverOrders  Order[]              @relation("DriverOrders")
+  reviews       Review[]
+  notifications Notification[]
+  loyalty       LoyaltyTransaction[]
+  auditLogs     AuditLog[]
+  loginHistory  LoginHistory[]
+  devices       Device[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roleId])
+  @@index([status])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  name        String           @unique // owner, admin, manager, driver, customer
+  description String?
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+}
+
+model Permission {
+  id       String           @id @default(cuid())
+  key      String           @unique // e.g. "orders.write", "products.delete"
+  label    String
+  roles    RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+// ---------------------------------------------------------------------------
+//  NextAuth adapter models
+// ---------------------------------------------------------------------------
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+//  Catalogue — Categories, Products, Images, Variants
+// ---------------------------------------------------------------------------
+model Category {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  name        String
+  nameEn      String
+  image       String?
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  products    Product[]
+  createdAt   DateTime   @default(now())
+
+  @@index([parentId])
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  nameEn       String
+  description  String   @db.Text
+  descriptionEn String  @db.Text
+  ingredients  String?
+  ingredientsEn String?
+  allergens    String?
+  allergensEn  String?
+  weight       String?
+  priceUsd         Decimal  @db.Decimal(10, 2)
+  originalPriceUsd Decimal? @db.Decimal(10, 2) // pre-discount price (for "restore")
+  discount         Int      @default(0) // percent
+  discountStartsAt DateTime? // scheduled discount window
+  discountEndsAt   DateTime?
+  stock            Int      @default(0)
+  rating       Float    @default(0)
+  ratingCount  Int      @default(0)
+
+  isFeatured   Boolean  @default(false)
+  isBestSeller Boolean  @default(false)
+  isNew        Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  seasonal     String?
+
+  // SEO
+  seoTitle       String?
+  seoDescription String?
+  tags           String[] @default([])
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  images     ProductImage[]
+  variants   ProductVariant[]
+  orderItems OrderItem[]
+  reviews    Review[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([isFeatured])
+  @@index([isBestSeller])
+  @@index([slug])
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  url       String
+  alt       String? // auto-generated alt text for SEO/a11y
+  position  Int     @default(0)
+  isVideo   Boolean @default(false)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  size      String
+  priceUsd  Decimal @db.Decimal(10, 2)
+  stock     Int     @default(0)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+//  Customers & Addresses
+// ---------------------------------------------------------------------------
+model Customer {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loyaltyPoints Int      @default(0)
+  totalSpent    Decimal  @default(0) @db.Decimal(12, 2)
+  favorites     String[] @default([]) // product ids
+  createdAt     DateTime @default(now())
+}
+
+model Address {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String? // Home / Work
+  fullName  String
+  phone     String
+  city      String
+  street    String
+  building  String?
+  notes     String?
+  isDefault Boolean @default(false)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+//  Orders
+// ---------------------------------------------------------------------------
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+}
+
+enum OrderState {
+  ACTIVE
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  REFUNDED
+}
+
+model Order {
+  id            String        @id @default(cuid())
+  number        String        @unique // NV-XXXXXX
+  userId        String?
+  user          User?         @relation(fields: [userId], references: [id])
+
+  // snapshot of delivery details
+  customerName  String
+  phone         String
+  city          String
+  street        String
+  building      String?
+  notes         String?
+
+  subtotalUsd   Decimal       @db.Decimal(10, 2)
+  deliveryUsd   Decimal       @db.Decimal(10, 2) @default(0)
+  discountUsd   Decimal       @db.Decimal(10, 2) @default(0)
+  totalUsd      Decimal       @db.Decimal(10, 2)
+  couponCode    String?
+
+  status        OrderStatus   @default(PENDING)
+  state         OrderState    @default(ACTIVE)
+  paymentMethod String        @default("Cash on Delivery")
+  paymentStatus PaymentStatus @default(UNPAID)
+
+  driverId      String?
+  driver        User?         @relation("DriverOrders", fields: [driverId], references: [id])
+
+  items         OrderItem[]
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([state])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  productId  String
+  name       String  // snapshot
+  nameEn     String
+  unitPrice  Decimal @db.Decimal(10, 2)
+  quantity   Int
+  order      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// NextAuth-driver back-relation helper
+// (User.driver relation named DriverOrders)
+
+// ---------------------------------------------------------------------------
+//  Marketing — Coupons & Loyalty
+// ---------------------------------------------------------------------------
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+model Coupon {
+  id        String     @id @default(cuid())
+  code      String     @unique
+  type      CouponType @default(PERCENT)
+  value     Decimal    @db.Decimal(10, 2)
+  usageLimit Int       @default(0) // 0 = unlimited
+  usedCount Int        @default(0)
+  active    Boolean    @default(true)
+  expiresAt DateTime?
+  createdAt DateTime   @default(now())
+}
+
+model LoyaltyTransaction {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  points    Int // positive = earned, negative = redeemed
+  reason    String
+  orderId   String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+//  Reviews & Notifications
+// ---------------------------------------------------------------------------
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Review {
+  id        String       @id @default(cuid())
+  productId String
+  userId    String
+  rating    Int
+  text      String       @db.Text
+  imageUrl  String?
+  status    ReviewStatus @default(PENDING)
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@index([productId])
+  @@index([status])
+}
+
+enum NotificationType {
+  ORDER
+  CANCEL
+  STOCK
+  USER
+  REVIEW
+  MESSAGE
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String? // null = admin/global notification
+  user      User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
+  @@index([read])
+}
+
+// ---------------------------------------------------------------------------
+//  Delivery, Exchange Rate & Settings
+// ---------------------------------------------------------------------------
+model DeliveryZone {
+  id        String   @id @default(cuid())
+  name      String
+  feeUsd    Decimal  @db.Decimal(10, 2)
+  minOrder  Decimal  @db.Decimal(10, 2) @default(0)
+  etaMin    Int      @default(10)
+  etaMax    Int      @default(30)
+  active    Boolean  @default(true)
+}
+
+model ExchangeRate {
+  id         String   @id @default(cuid())
+  base       String   @default("USD")
+  quote      String   @default("SYP")
+  rate       Decimal  @db.Decimal(14, 4)
+  source     String   @default("manual") // telegram | provider | manual | auto
+  rawMessage String? // original Telegram channel text (for audit/parsing trace)
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([source])
+}
+
+model WebsiteSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value Json
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+//  Analytics, Audit & Security
+// ---------------------------------------------------------------------------
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  type      String // page_view, product_view, add_to_cart, purchase, search
+  path      String?
+  productId String?
+  userId    String?
+  sessionId String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String // e.g. "product.update"
+  entity    String?
+  entityId  String?
+  ip        String?
+  userAgent String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String?
+  success   Boolean
+  ip        String?
+  userAgent String?
+  location  String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  userAgent  String?
+  ip         String?
+  lastSeenAt DateTime @default(now())
+  trusted    Boolean  @default(false)
+
+  @@index([userId])
+}
+
+model Backup {
+  id        String   @id @default(cuid())
+  filename  String
+  sizeBytes BigInt   @default(0)
+  status    String   @default("completed") // completed | failed | restoring
+  location  String   @default("local")     // local | cloud
+  createdAt DateTime @default(now())
+}
+
+// Web Push subscriptions (VAPID) + topic preferences.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userId    String?
+  topics    String[] @default(["offers", "orders"]) // offers | discounts | products | orders
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+//  Auth flow tokens (email verify, password reset, phone OTP)
+// ---------------------------------------------------------------------------
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique // store a hash of the token in production
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+model PhoneOtp {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String // hashed 6-digit code
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+}
+
+// ---------------------------------------------------------------------------
+//  Media library — all uploaded/optimized assets, referenced by the catalogue
+// ---------------------------------------------------------------------------
+enum MediaFolder {
+  PRODUCTS
+  CATEGORIES
+  BANNERS
+  PROMOS
+  GALLERY
+  ASSETS
+}
+
+model MediaAsset {
+  id           String      @id @default(cuid())
+  folder       MediaFolder @default(PRODUCTS)
+  filename     String
+  url          String // optimized (WebP) master URL
+  alt          String? // SEO / a11y alt text
+  mime         String      @default("image/webp")
+  width        Int?
+  height       Int?
+  sizeBytes    Int         @default(0)
+  blurDataUrl  String? // tiny base64 LQIP for instant placeholder
+  variants     Json? // { "320": url, "640": url, "1024": url, "original": url }
+  uploadedById String?
+  createdAt    DateTime    @default(now())
+
+  @@index([folder])
+  @@index([createdAt])
+}
