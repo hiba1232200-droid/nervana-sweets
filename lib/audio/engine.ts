@@ -19,8 +19,10 @@ export interface AudioSettings {
   sfxVol: number;     // 0..1
 }
 
-const KEY = "nv_audio";
-const DEFAULTS: AudioSettings = { enabled: true, musicOn: true, sfxOn: true, musicVol: 0.45, sfxVol: 0.6 };
+const KEY = "nv_audio_v2";
+// Music (the ambient song) is OFF by default — only the subtle touch/UI sound
+// effects play. Visitors can still turn music on from the audio panel if they like.
+const DEFAULTS: AudioSettings = { enabled: true, musicOn: false, sfxOn: true, musicVol: 0.45, sfxVol: 0.6 };
 
 // Pentatonic scale (Hz) — warm, always-consonant ambient palette.
 const PAD_NOTES = [130.81, 146.83, 164.81, 196.0, 220.0, 261.63, 293.66];
@@ -207,6 +209,9 @@ class AudioEngine {
   // ── Cinematic intro swell, synced to the 3D intro duration ──
   playIntro(durationMs: number) {
     this.unlock();
+    // The intro swell is part of "music"; stay silent when music is off
+    // (touch/UI sound effects are unaffected and still play).
+    if (!this.settings.enabled || !this.settings.musicOn) return;
     if (!this.ctx || !this.musicGain) return;
     const ctx = this.ctx, dur = durationMs / 1000;
     const bus = ctx.createGain(); bus.gain.value = 0.0001; bus.connect(this.reverb || this.musicGain);

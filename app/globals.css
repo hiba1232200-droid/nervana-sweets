@@ -25,13 +25,33 @@
 
 html {
   scroll-behavior: smooth;
+  /* Lock the page horizontally so a sideways swipe on mobile can't drag it.
+     `clip` stops the drift without breaking sticky headers the way `hidden` can. */
+  overflow-x: clip;
+  width: 100%;
+  overscroll-behavior-x: none;
 }
 
 body {
   background: #0b0b0b;
   color: #f7f1e3;
   font-family: var(--font-body);
-  overflow-x: hidden;
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
+
+/* Safety net: nothing may push the layout wider than the screen. */
+#__next, main {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
+/* iOS: stop form fields from auto-zooming (keeps the page from shifting). */
+input, select, textarea {
+  font-size: 16px;
 }
 
 /* RTL / LTR handled by dir attribute on <html> */

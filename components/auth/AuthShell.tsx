@@ -14,14 +14,14 @@ export default function AuthShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="relative grid min-h-screen place-items-center overflow-hidden bg-luxury-radial px-4 py-16">
+    <div className="relative grid min-h-[100dvh] place-items-center overflow-hidden bg-luxury-radial px-4 py-10 sm:py-16">
       <Particles count={24} />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-ink" />
-      <div className="pointer-events-none absolute left-1/2 top-24 h-72 w-72 -translate-x-1/2 rounded-full bg-gold/10 blur-[120px]" />
+      <div className="pointer-events-none absolute left-1/2 top-24 h-72 w-72 max-w-[90vw] -translate-x-1/2 rounded-full bg-gold/10 blur-[120px]" />
 
       <motion.div
         initial={{ opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-10 w-full max-w-md rounded-3xl border border-gold/20 bg-ink-soft/70 p-8 backdrop-blur-xl shadow-cinematic"
+        className="relative z-10 w-full max-w-md rounded-3xl border border-gold/20 bg-ink-soft/70 p-6 backdrop-blur-xl shadow-cinematic sm:p-8"
       >
         <Link href="/" className="mb-6 flex flex-col items-center gap-1">
           <span className="grid h-14 w-14 place-items-center rounded-2xl border border-gold/40 font-display text-2xl font-bold text-gold">N</span>

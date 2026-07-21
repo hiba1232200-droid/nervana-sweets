@@ -18,11 +18,11 @@ export default function AdminLogin() {
   const failed = attempts.filter((a) => !a.success).length;
 
   return (
-    <div className="relative grid min-h-screen place-items-center overflow-hidden bg-luxury-radial px-4">
+    <div className="relative grid min-h-[100dvh] place-items-center overflow-hidden bg-luxury-radial px-4 py-10">
       <Particles count={22} />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-ink" />
       <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
-        className="relative z-10 w-full max-w-md rounded-3xl border border-gold/20 bg-ink-soft/80 p-8 backdrop-blur-xl shadow-cinematic">
+        className="relative z-10 w-full max-w-md rounded-3xl border border-gold/20 bg-ink-soft/80 p-6 backdrop-blur-xl shadow-cinematic sm:p-8">
         <div className="mb-6 text-center">
           <span className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-2xl border border-gold/40 text-gold">
             <Shield size={30} />
