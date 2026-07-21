@@ -24,10 +24,20 @@ export const POST = route(async (req) => {
 
   await prisma.phoneOtp.update({ where: { id: otp.id }, data: { verified: true } });
   const customerRole = await prisma.role.findUnique({ where: { name: "customer" } });
+  // Phone-only accounts still need a unique email (schema requires it). Derive a
+  // stable placeholder from the (unique) phone number; users can set a real email later.
+  const placeholderEmail = `${phone.replace(/[^0-9]/g, "")}@phone.nervana.local`;
   const user = await prisma.user.upsert({
     where: { phone },
     update: { phoneVerified: new Date() },
-    create: { phone, name: "NERVANA Customer", roleId: customerRole?.id, phoneVerified: new Date(), customer: { create: {} } },
+    create: {
+      phone,
+      email: placeholderEmail,
+      name: "NERVANA Customer",
+      roleId: customerRole?.id,
+      phoneVerified: new Date(),
+      customer: { create: {} },
+    },
   });
   return ok({ verified: true, userId: user.id });
 });
